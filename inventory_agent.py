@@ -90,6 +90,14 @@ class InventoryDecisionAgent:
                 (r"\bper\s*unit\s*(drops|reduces|discount)\b", 3.0),
                 (r"\bpercentage\s*holding\s*cost\b", 3.0),
                 (r"\bfixed\s*holding\s*cost\b", 3.0),
+                (r"\bcharges?\s*[\$]?\d+(?:\.\d+)?.*for.*(?:orders?|units?)\b", 4.0),
+                (r"\b(?:below|under|less\s*than)\s*[0-9,]+\s*units?\b", 3.5),
+                (r"\b[0-9,]+\s*(?:to|-)\s*[0-9,]+\s*units?\b", 3.5),
+                (r"\b[0-9,]+\s*(?:\+|\s*or\s*more)\s*units?\b", 3.5),
+                (r"\bpricing\s*(?:schedule|structure|tiers?)\b", 4.0),
+                (r"\bvolume\s*(?:pricing|discount|purchase)\b", 4.0),
+                (r"\bquantity\s*(?:discount|pricing|breaks?)\b", 4.5),
+                (r"\bprice\s*(?:breaks?|tiers?|schedule)\b", 4.5),
             ],
             self.MODEL_FIXED_PERIOD_REVIEW: [
                 (r"\bfixed[- ]period\b", 4.5),
@@ -175,8 +183,14 @@ class InventoryDecisionAgent:
             scores[self.MODEL_FIXED_PERIOD_REVIEW] += 6.0
 
         # 2. Quantity Discount priority
-        if any(k in clean_text for k in ["break", "tier", "discount", "bracket", "bulk pricing"]):
+        if any(k in clean_text for k in ["break", "tier", "discount", "bracket", "bulk pricing", "price schedule"]):
             scores[self.MODEL_QUANTITY_DISCOUNT] += 4.0
+
+        # Disambiguation: If multiple price breaks / pricing tiers are detected in question text,
+        # it is decisively a Quantity Discount problem, not a single-price EOQ problem.
+        detected_breaks = self._extract_price_breaks_from_text(clean_text)
+        if detected_breaks and len(detected_breaks) >= 2:
+            scores[self.MODEL_QUANTITY_DISCOUNT] += 12.0
 
         # 3. Newsvendor priority
         if any(k in clean_text for k in ["salvage", "perishable", "newsvendor", "underage", "overage", "critical ratio", "markdown"]):
@@ -281,11 +295,11 @@ class InventoryDecisionAgent:
             # 4. Holding / Carrying Cost (H)
             if "holding_cost" not in extracted:
                 h = extract_number([
-                    r"(?:annual\s*|yearly\s*)?(?:fixed\s*)?(?:inventory\s*)?(?:holding|carrying)(?:\/carrying|\/holding)?\s*(?:costs?|expenses?)" + var_annot + r"(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
-                    r"(?:cost\s*to\s*hold|cost\s*of\s*holding|cost\s*to\s*carry|cost\s*of\s*carrying)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
-                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually|\/year|a\s*year)|per\s*(?:unit|" + unit_nouns + r")\s*carrying|per\s*(?:unit|" + unit_nouns + r")\s*holding|\/unit\/year|\/unit\s*per\s*year)",
-                    r"costs?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:to\s*hold|to\s*carry)\s*(?:each|one|a)?\s*(?:unit|" + unit_nouns + r")?",
-                    r"\b[hH]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:annual\s*|yearly\s*)?(?:fixed\s*)?(?:inventory\s*)?(?:holding|carrying)(?:\/carrying|\/holding)?\s*(?:costs?|expenses?)" + var_annot + r"(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
+                    r"(?:cost\s*to\s*hold|cost\s*of\s*holding|cost\s*to\s*carry|cost\s*of\s*carrying)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
+                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually|\/year|a\s*year)|per\s*(?:unit|" + unit_nouns + r")\s*carrying|per\s*(?:unit|" + unit_nouns + r")\s*holding|\/unit\/year|\/unit\s*per\s*year)",
+                    r"costs?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)\s*(?:dollars?|bucks?|\$)?\s*(?:to\s*hold|to\s*carry)\s*(?:each|one|a)?\s*(?:unit|" + unit_nouns + r")?",
+                    r"\b[hH]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)",
                 ], q)
                 if h is not None:
                     extracted["holding_cost"] = h
@@ -294,6 +308,7 @@ class InventoryDecisionAgent:
             if "holding_cost_rate" not in extracted:
                 pct_rate = extract_number([
                     r"(?:annual\s*holding\s*cost\s*rate|percentage\s*holding\s*costs?|carrying\s*cost\s*rate|holding\s*cost\s*rate|carrying\s*rate|holding\s*rate|annual\s*carrying\s*cost\s*rate)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+                    r"(?:annual\s*|yearly\s*)?(?:inventory\s*)?(?:holding|carrying)\s*costs?" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:of\s*(?:the\s*)?(?:unit\s*)?(?:purchase\s*)?(?:cost|price))?",
                     r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:of\s*(?:the\s*)?(?:unit\s*)?(?:purchase\s*)?(?:cost|price)|carrying\s*cost\s*rate|holding\s*cost\s*rate|holding|carrying)",
                     r"\b[iI]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9]+(?:\.[0-9]+)?)\s*%",
                 ], q)
@@ -366,7 +381,8 @@ class InventoryDecisionAgent:
             if "holding_cost_rate" not in extracted:
                 h_rate = extract_number([
                     r"(?:percentage\s*holding\s*costs?|inventory\s*carrying\s*cost\s*rate|carrying\s*cost\s*rate|holding\s*cost\s*rate|carrying\s*rate|holding\s*rate|annual\s*carrying\s*cost\s*rate|annual\s*holding\s*cost\s*rate)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
-                    r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:carrying\s*cost\s*rate|holding\s*cost\s*rate|of\s*(?:unit|purchase)?\s*price|carrying|holding)",
+                    r"(?:annual\s*|yearly\s*)?(?:inventory\s*)?(?:holding|carrying)\s*costs?" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:of\s*(?:the\s*)?(?:unit|purchase)?\s*(?:cost|price))?",
+                    r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:of\s*(?:the\s*)?(?:unit\s*)?(?:purchase\s*)?(?:cost|price)|carrying\s*cost\s*rate|holding\s*cost\s*rate|carrying|holding)",
                     r"\b[iI]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9]+(?:\.[0-9]+)?)\s*%",
                 ], q)
                 if h_rate is not None:
@@ -375,10 +391,10 @@ class InventoryDecisionAgent:
             # Fixed Holding Cost (fixed_holding_cost)
             if "fixed_holding_cost" not in extracted and "holding_cost_rate" not in extracted:
                 fixed_h = extract_number([
-                    r"(?:annual\s*|yearly\s*)?(?:fixed\s*)?(?:inventory\s*)?(?:holding|carrying)(?:\/carrying|\/holding)?\s*(?:costs?|expenses?)" + var_annot + r"(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
-                    r"holding\s*cost\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually|\/year|a\s*year))",
-                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually)\s*(?:fixed\s*)?holding\s*cost|fixed\s*holding\s*cost)",
-                    r"\b[hH]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:annual\s*|yearly\s*)?(?:fixed\s*)?(?:inventory\s*)?(?:holding|carrying)(?:\/carrying|\/holding)?\s*(?:costs?|expenses?)" + var_annot + r"(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
+                    r"holding\s*cost\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually|\/year|a\s*year))",
+                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually)\s*(?:fixed\s*)?holding\s*cost|fixed\s*holding\s*cost)",
+                    r"\b[hH]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)(?!\s*%\b)",
                 ], q)
                 if fixed_h is not None:
                     extracted["fixed_holding_cost"] = fixed_h
@@ -696,34 +712,57 @@ class InventoryDecisionAgent:
         return extracted, missing
 
     def _extract_price_breaks_from_text(self, text: str) -> Optional[List[Dict[str, Any]]]:
-        """Parse structured text for price breaks (e.g. '0-499: $10, 500-999: $9, 1000+: $8', or '$50 for 0-999 units')."""
+        """Parse structured text for price breaks (e.g. '0-499: $10, 500-999: $9, 1000+: $8', or '$12 below 500, $11.50 for 500-999, $11 for 1000+')."""
         breaks = []
 
-        # 1. Price first: "$50 for 0 to 999 units", "$50 each for 0-499 units"
+        # 1. Price first - below / under: "$12 per unit for orders below 500 units"
+        pat_price_first_below = re.compile(
+            r"[\$]([0-9]+(?:\.[0-9]+)?)\s*(?:per\s*unit|each)?\s*(?:for\s*(?:orders\s*(?:of)?)?)?\s*(?:below|under|less\s*than)\s*([0-9,]+)\s*(?:units?)?",
+            re.IGNORECASE
+        )
+        for m in pat_price_first_below.finditer(text):
+            price = float(m.group(1))
+            thresh = float(m.group(2).replace(",", ""))
+            breaks.append({"min_qty": 0.0, "max_qty": thresh - 1.0, "unit_price": price})
+
+        # 1b. Price first - up to: "$12 for up to 499 units"
+        pat_price_first_upto = re.compile(
+            r"[\$]([0-9]+(?:\.[0-9]+)?)\s*(?:per\s*unit|each)?\s*(?:for\s*(?:orders\s*(?:of)?)?)?\s*(?:up\s*to)\s*([0-9,]+)\s*(?:units?)?",
+            re.IGNORECASE
+        )
+        for m in pat_price_first_upto.finditer(text):
+            price = float(m.group(1))
+            max_q = float(m.group(2).replace(",", ""))
+            if not any(b["min_qty"] == 0.0 for b in breaks):
+                breaks.append({"min_qty": 0.0, "max_qty": max_q, "unit_price": price})
+
+        # 2. Price first - closed range: "$11.50 for 500-999 units", "$11.50 for orders of 500 to 999 units"
         pat_price_first_closed = re.compile(
-            r"[\$]([0-9]+(?:\.[0-9]+)?)\s*(?:per\s*unit|each)?\s*(?:for|at)\s*([0-9,]+)\s*(?:to|-)\s*([0-9,]+)\s*(?:units?)?",
+            r"[\$]([0-9]+(?:\.[0-9]+)?)\s*(?:per\s*unit|each)?\s*(?:for\s*(?:orders\s*(?:of)?)?|between)\s*([0-9,]+)\s*(?:to|-|and)\s*([0-9,]+)\s*(?:units?)?",
             re.IGNORECASE
         )
         for m in pat_price_first_closed.finditer(text):
             price = float(m.group(1))
             min_q = float(m.group(2).replace(",", ""))
             max_q = float(m.group(3).replace(",", ""))
-            breaks.append({"min_qty": min_q, "max_qty": max_q, "unit_price": price})
+            if not any(b["min_qty"] == min_q for b in breaks):
+                breaks.append({"min_qty": min_q, "max_qty": max_q, "unit_price": price})
 
-        # 2. Price first open-ended: "$45 for 1000+ units", "$45 for 1000 or more units"
+        # 3. Price first - open-ended: "$11 for orders of 1,000 units or more", "$45 for 1000+ units"
         pat_price_first_open = re.compile(
-            r"[\$]([0-9]+(?:\.[0-9]+)?)\s*(?:per\s*unit|each)?\s*(?:for|at)\s*([0-9,]+)\s*(?:\+|\s*or\s*more)\s*(?:units?)?",
+            r"[\$]([0-9]+(?:\.[0-9]+)?)\s*(?:per\s*unit|each)?\s*(?:for\s*(?:orders\s*(?:of)?)?|at)\s*(?:(?:over|above|more\s*than)\s*([0-9,]+)\s*(?:units?)?|([0-9,]+)\s*(?:units?)?\s*(?:\+|\s*or\s*more|\s*and\s*(?:above|up))\s*(?:units?)?)",
             re.IGNORECASE
         )
         for m in pat_price_first_open.finditer(text):
             price = float(m.group(1))
-            min_q = float(m.group(2).replace(",", ""))
+            q_str = m.group(2) or m.group(3)
+            min_q = float(q_str.replace(",", ""))
             if not any(b["min_qty"] == min_q for b in breaks):
                 breaks.append({"min_qty": min_q, "max_qty": None, "unit_price": price})
 
-        # 3. Closed ranges: "0-999 units at $50", "(0-499 units) at $10.00", "0 to 499 units: $10"
+        # 4. Quantity first - closed ranges: "0-499 units at $10.00", "(0-499 units) at $10.00", "0 to 499 units: $10"
         range_pat = re.compile(
-            r"(?:tier\s*\d+:?\s*)?\(?([0-9,]+)\s*(?:to|-)\s*([0-9,]+)\s*(?:units?)?\)?\s*(?:at|costs?|price|for|=|:)\s*[\$]?([0-9]+(?:\.[0-9]+)?)",
+            r"(?:tier\s*\d+:?\s*)?\(?(?:orders\s*(?:of)?)?\s*([0-9,]+)\s*(?:to|-)\s*([0-9,]+)\s*(?:units?)?\)?\s*(?:at|costs?|price|for|=|:)\s*[\$]?([0-9]+(?:\.[0-9]+)?)",
             re.IGNORECASE
         )
         for m in range_pat.finditer(text):
@@ -733,9 +772,8 @@ class InventoryDecisionAgent:
             if not any(b["min_qty"] == min_q for b in breaks):
                 breaks.append({"min_qty": min_q, "max_qty": max_q, "unit_price": price})
 
-        # Closed ranges with explicit 'units': "0-999 units $50"
         range_pat_units = re.compile(
-            r"(?:tier\s*\d+:?\s*)?\(?([0-9,]+)\s*(?:to|-)\s*([0-9,]+)\s*units?\)?\s*(?:at|costs?|price|for|=|:)?\s*[\$]([0-9]+(?:\.[0-9]+)?)",
+            r"(?:tier\s*\d+:?\s*)?\(?(?:orders\s*(?:of)?)?\s*([0-9,]+)\s*(?:to|-)\s*([0-9,]+)\s*units?\)?\s*(?:at|costs?|price|for|=|:)?\s*[\$]([0-9]+(?:\.[0-9]+)?)",
             re.IGNORECASE
         )
         for m in range_pat_units.finditer(text):
@@ -745,26 +783,48 @@ class InventoryDecisionAgent:
             if not any(b["min_qty"] == min_q for b in breaks):
                 breaks.append({"min_qty": min_q, "max_qty": max_q, "unit_price": price})
 
-        # 4. Open-ended ranges: "1000+ units at $45", "(500+ units) at $8.00", "500 or more units at $8"
+        # 5. Quantity first - open-ended ranges: "1000+ units at $45", "(500+ units) at $8.00", "500 or more units at $8"
         open_pat = re.compile(
-            r"(?:tier\s*\d+:?\s*)?\(?(?:over|more\s*than|greater\s*than)?\s*([0-9,]+)\s*(?:\+|\s*or\s*more)\s*(?:units?)?\)?\s*(?:at|costs?|price|for|=|:)?\s*[\$]?([0-9]+(?:\.[0-9]+)?)",
+            r"(?:tier\s*\d+:?\s*)?\(?(?:orders\s*(?:of)?)?\s*(?:(?:over|above|more\s*than)\s*([0-9,]+)\s*(?:units?)?|([0-9,]+)\s*(?:units?)?\s*(?:\+|\s*or\s*more|\s*and\s*(?:above|up))\s*(?:units?)?)\)?\s*(?:at|costs?|price|for|=|:)\s*[\$]?([0-9]+(?:\.[0-9]+)?)",
             re.IGNORECASE
         )
         for m in open_pat.finditer(text):
-            min_q = float(m.group(1).replace(",", ""))
-            price = float(m.group(2))
+            q_str = m.group(1) or m.group(2)
+            min_q = float(q_str.replace(",", ""))
+            price = float(m.group(3))
             if not any(b["min_qty"] == min_q for b in breaks):
                 breaks.append({"min_qty": min_q, "max_qty": None, "unit_price": price})
 
-        # 5. "Under 500 units at $10", "less than 500 units at $10"
+        open_pat_dollar = re.compile(
+            r"(?:tier\s*\d+:?\s*)?\(?(?:orders\s*(?:of)?)?\s*(?:(?:over|above|more\s*than)\s*([0-9,]+)\s*(?:units?)?|([0-9,]+)\s*(?:units?)?\s*(?:\+|\s*or\s*more|\s*and\s*(?:above|up))\s*(?:units?)?)\)?\s*(?:at|costs?|price|for|=|:)?\s*[\$]([0-9]+(?:\.[0-9]+)?)",
+            re.IGNORECASE
+        )
+        for m in open_pat_dollar.finditer(text):
+            q_str = m.group(1) or m.group(2)
+            min_q = float(q_str.replace(",", ""))
+            price = float(m.group(3))
+            if not any(b["min_qty"] == min_q for b in breaks):
+                breaks.append({"min_qty": min_q, "max_qty": None, "unit_price": price})
+
+        # 6. Quantity first - upper bound: "under 500 units at $10", "less than 500 units at $10", "orders below 500 units at $12"
         under_pat = re.compile(
-            r"(?:under|less\s*than|below)\s*([0-9,]+)\s*(?:units?)?\s*(?:at|costs?|price|for|=|:)?\s*[\$]?([0-9]+(?:\.[0-9]+)?)",
+            r"(?:orders\s*(?:of)?)?\s*(?:under|less\s*than|below)\s*([0-9,]+)\s*(?:units?)?\s*(?:at|costs?|price|for|=|:)\s*[\$]?([0-9]+(?:\.[0-9]+)?)",
             re.IGNORECASE
         )
         for m in under_pat.finditer(text):
             max_val = float(m.group(1).replace(",", "")) - 1.0
             price = float(m.group(2))
-            if not any(b["min_qty"] == 0 for b in breaks):
+            if not any(b["min_qty"] == 0.0 for b in breaks):
+                breaks.append({"min_qty": 0.0, "max_qty": max_val, "unit_price": price})
+
+        under_pat_dollar = re.compile(
+            r"(?:orders\s*(?:of)?)?\s*(?:under|less\s*than|below)\s*([0-9,]+)\s*(?:units?)?\s*(?:at|costs?|price|for|=|:)?\s*[\$]([0-9]+(?:\.[0-9]+)?)",
+            re.IGNORECASE
+        )
+        for m in under_pat_dollar.finditer(text):
+            max_val = float(m.group(1).replace(",", "")) - 1.0
+            price = float(m.group(2))
+            if not any(b["min_qty"] == 0.0 for b in breaks):
                 breaks.append({"min_qty": 0.0, "max_qty": max_val, "unit_price": price})
 
         # Sort breaks by min_qty and deduplicate
