@@ -17,14 +17,19 @@ import sys
 import argparse
 from typing import Optional, Dict, Any
 
-# Seamless bridge: if invoked via `streamlit run app.py`
-try:
-    import streamlit.runtime
-    if streamlit.runtime.exists():
-        import web_app
-        sys.exit(0)
-except Exception:
-    pass
+def is_streamlit_running() -> bool:
+    """Detect whether script is running inside an active Streamlit runtime."""
+    try:
+        import streamlit.runtime
+        return streamlit.runtime.exists()
+    except Exception:
+        return False
+
+# Seamless bridge: if invoked via `streamlit run app.py` (e.g. on Streamlit Cloud)
+if is_streamlit_running():
+    import web_app
+    web_app.run_app()
+
 
 from rich.console import Console
 from rich.panel import Panel
@@ -268,7 +273,7 @@ def main():
     if args.web:
         import subprocess
         console.print("[bold green]Starting Streamlit Interactive Web Application...[/bold green]")
-        subprocess.run([sys.executable, "-m", "streamlit", "run", "web_app.py"])
+        subprocess.run([sys.executable, "-m", "streamlit", "run", "streamlit_app.py"])
     elif args.demo:
         display_banner()
         for scenario in SAMPLE_SCENARIOS:
@@ -286,4 +291,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if not is_streamlit_running():
+        main()
