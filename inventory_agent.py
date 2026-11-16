@@ -210,13 +210,15 @@ class InventoryDecisionAgent:
         missing: List[str] = []
 
         q = question.lower()
+        unit_nouns = r"(?:units|bags|items|pieces|kits|pounds|lbs|boxes|cartons|cases|packs|bottles|cans|pallets|cartridges|vials|rolls)"
+        var_annot = r"(?:\s*\([a-zA-Z0-9_α-ωΑ-Ωσ\s\/\.-]+\))?"
 
         def extract_number(patterns: List[str], text: str) -> Optional[float]:
             """Try a list of regex patterns and extract the first positive numerical match."""
             for pat in patterns:
                 m = re.search(pat, text, re.IGNORECASE)
                 if m:
-                    raw_val = m.group(1).replace(",", "").replace("$", "").rstrip(",.;: )")
+                    raw_val = m.group(1).replace(",", "").replace("$", "").replace("%", "").strip(" ,.;:)")
                     try:
                         val = float(raw_val)
                         return val
@@ -231,12 +233,13 @@ class InventoryDecisionAgent:
             # 1. Annual Demand (D)
             if "demand" not in extracted:
                 d = extract_number([
-                    r"(?:annual\s*demand|yearly\s*demand|demand\s*per\s*year|demand\s*annually|annual\s*sales|yearly\s*sales|annual\s*usage|annual\s*consumption)(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?",
-                    r"(?:demand|sells?|requires?|needs?|consumes?)(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?\s*(?:per\s*year|annually|a\s*year)",
-                    r"([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?\s*(?:per\s*year|annually|a\s*year)\s*(?:demand|sales|usage)?",
-                    r"(?:annual\s*demand|demand\s*is|demand\s*of|sells?)\s*(?:approximately|about)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?",
-                    r"(?:monthly\s*demand|demand\s*per\s*month)(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"([0-9,]+(?:\.[0-9]+)?)\s*units\s*per\s*month",
+                    r"(?:annual\s*demand|yearly\s*demand|demand\s*per\s*year|demand\s*annually|annual\s*sales|yearly\s*sales|annual\s*usage|annual\s*consumption)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"(?:demand|sells?|requires?|needs?|consumes?)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:per\s*year|annually|a\s*year)",
+                    r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:per\s*year|annually|a\s*year)\s*(?:demand|sales|usage)?",
+                    r"(?:annual\s*demand|demand\s*is|demand\s*of|sells?)" + var_annot + r"\s*(?:approximately|about)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"(?:monthly\s*demand|demand\s*per\s*month)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*per\s*month",
+                    r"\b[dD]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d is not None:
                     if ("per month" in q or "monthly" in q) and "annual" not in q and "yearly" not in q:
@@ -253,54 +256,69 @@ class InventoryDecisionAgent:
             # - ordering/setup cost
             if "ordering_cost" not in extracted:
                 s = extract_number([
-                    r"(?:ordering\/setup\s*costs?|ordering\s*and\s*setup\s*costs?|order\/setup\s*costs?|order\s*and\s*setup\s*costs?)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:cost\s*of\s*placing\s*(?:an?|a\s*purchase)?\s*order|cost\s*to\s*place\s*(?:an?|a\s*purchase)?\s*order|cost\s*per\s*order|expense\s*per\s*order)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:setup\s*expenses?|setup\s*costs?|ordering\s*costs?|order\s*costs?)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:placing\s*(?:an?|a\s*purchase)?\s*order\s*costs?|place\s*(?:an?|a\s*purchase)?\s*order\s*costs?|order\s*fee|setup\s*fee)\s*(?:us|is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"costs?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:to\s*place\s*(?:an?|a\s*purchase)?\s*order|per\s*order|each\s*time\s*we\s*order|per\s*setup|to\s*order)",
-                    r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*order|setup\s*expense|setup\s*cost|ordering\s*cost|order\s*cost|ordering\/setup\s*cost|each\s*time\s*we\s*order)",
+                    r"(?:ordering\/setup\s*costs?|ordering\s*and\s*setup\s*costs?|order\/setup\s*costs?|order\s*and\s*setup\s*costs?)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"(?:cost\s*of\s*placing\s*(?:an?|a\s*purchase)?\s*order|cost\s*to\s*place\s*(?:an?|a\s*purchase)?\s*order|cost\s*per\s*(?:purchase\s*)?order|expense\s*per\s*(?:purchase\s*)?order)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"(?:setup\s*expenses?|setup\s*costs?|ordering\s*costs?|order\s*costs?)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"(?:placing\s*(?:(?:an?|a\s*purchase)\s*)?order\s*costs?|place\s*(?:(?:an?|a\s*purchase)\s*)?order\s*costs?|order\s*fee|setup\s*fee)" + var_annot + r"\s*(?:us|is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"costs?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:to\s*place\s*(?:an?|a\s*purchase)?\s*order|per\s*(?:purchase\s*)?order|each\s*time\s*we\s*order|per\s*setup|to\s*order)",
+                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:purchase\s*)?order|setup\s*expense|setup\s*cost|ordering\s*cost|order\s*cost|ordering\/setup\s*cost|each\s*time\s*we\s*order)",
+                    r"\b[sS]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if s is not None:
                     extracted["ordering_cost"] = s
 
-            # 3. Holding / Carrying Cost (H)
-            if "holding_cost" not in extracted:
-                h = extract_number([
-                    r"(?:fixed\s*holding\s*costs?|inventory\s*holding\s*costs?|inventory\s*carrying\s*costs?|holding\/carrying\s*costs?|carrying\/holding\s*costs?)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:holding\s*costs?|carrying\s*costs?|holding\s*expense|carrying\s*expense)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:cost\s*to\s*hold|cost\s*of\s*holding|cost\s*to\s*carry|cost\s*of\s*carrying)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*unit\s*(?:per\s*year|annually|\/year|a\s*year)|per\s*unit\s*carrying|per\s*unit\s*holding|\/unit\/year|\/unit\s*per\s*year)",
-                    r"costs?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:to\s*hold|to\s*carry)\s*(?:each|one|a)?\s*(?:unit)?",
-                ], q)
-                if h is not None:
-                    extracted["holding_cost"] = h
-
-            # 4. Unit Purchase Price (C)
+            # 3. Unit Purchase Price (C or P)
             if "unit_cost" not in extracted:
                 c = extract_number([
-                    r"(?:unit\s*purchase\s*price|unit\s*purchase\s*cost|purchase\s*price|purchase\s*cost|wholesale\s*price|wholesale\s*cost|item\s*cost|unit\s*cost|unit\s*price)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:buys?\s*for|costs?\s*us|procure\s*(?:at|for)|price\s*is)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*unit|each)?",
-                    r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*unit\s*(?:purchase|cost|price)|wholesale)",
+                    r"(?:purchase\s*price(?:\s*per\s*(?:unit|" + unit_nouns + r"))?|unit\s*purchase\s*price|purchase\s*cost(?:\s*per\s*(?:unit|" + unit_nouns + r"))?|unit\s*purchase\s*cost|wholesale\s*price|wholesale\s*cost|item\s*cost|unit\s*cost|unit\s*price)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:buys?\s*for|costs?\s*us|procure\s*(?:at|for)|price\s*is)" + var_annot + r"\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*(?:unit|" + unit_nouns + r")|each)?",
+                    r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:purchase|cost|price)|wholesale)",
+                    r"\b[pPcC]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if c is not None:
                     extracted["unit_cost"] = c
 
-            # Check percentage holding cost (e.g. 20% of unit price)
+            # 4. Holding / Carrying Cost (H)
             if "holding_cost" not in extracted:
-                pct_rate = extract_number([
-                    r"(?:percentage\s*holding\s*costs?|carrying\s*cost\s*rate|holding\s*cost\s*rate|carrying\s*rate|holding\s*rate)\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
-                    r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:of\s*(?:unit\s*)?(?:cost|price|purchase\s*price)|carrying\s*cost\s*rate|holding\s*cost\s*rate|holding|carrying)",
+                h = extract_number([
+                    r"(?:annual\s*|yearly\s*)?(?:fixed\s*)?(?:inventory\s*)?(?:holding|carrying)(?:\/carrying|\/holding)?\s*(?:costs?|expenses?)" + var_annot + r"(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
+                    r"(?:cost\s*to\s*hold|cost\s*of\s*holding|cost\s*to\s*carry|cost\s*of\s*carrying)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
+                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually|\/year|a\s*year)|per\s*(?:unit|" + unit_nouns + r")\s*carrying|per\s*(?:unit|" + unit_nouns + r")\s*holding|\/unit\/year|\/unit\s*per\s*year)",
+                    r"costs?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:to\s*hold|to\s*carry)\s*(?:each|one|a)?\s*(?:unit|" + unit_nouns + r")?",
+                    r"\b[hH]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
-                if pct_rate is not None and "unit_cost" in extracted:
-                    extracted["holding_cost"] = (pct_rate / 100.0) * extracted["unit_cost"]
+                if h is not None:
+                    extracted["holding_cost"] = h
+
+            # Check percentage holding cost (e.g. 20% of unit price)
+            if "holding_cost_rate" not in extracted:
+                pct_rate = extract_number([
+                    r"(?:annual\s*holding\s*cost\s*rate|percentage\s*holding\s*costs?|carrying\s*cost\s*rate|holding\s*cost\s*rate|carrying\s*rate|holding\s*rate|annual\s*carrying\s*cost\s*rate)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+                    r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:of\s*(?:the\s*)?(?:unit\s*)?(?:purchase\s*)?(?:cost|price)|carrying\s*cost\s*rate|holding\s*cost\s*rate|holding|carrying)",
+                    r"\b[iI]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+                ], q)
+                if pct_rate is not None:
                     extracted["holding_cost_rate"] = pct_rate / 100.0
 
-            # 5. Lead Time (days)
+            if "holding_cost" not in extracted and "holding_cost_rate" in extracted and "unit_cost" in extracted:
+                extracted["holding_cost"] = extracted["holding_cost_rate"] * extracted["unit_cost"]
+
+            # 5. Operating / Working Days per Year
+            if "working_days" not in extracted:
+                wd = extract_number([
+                    r"(?:operating\s*days(?:\s*per\s*year)?|working\s*days(?:\s*per\s*year)?|business\s*days(?:\s*per\s*year)?|days\s*per\s*year)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
+                    r"([0-9,]+(?:\.[0-9]+)?)\s*(?:operating|working|business)\s*days(?:\s*per\s*year|\/year)?",
+                ], q)
+                if wd is not None:
+                    extracted["working_days"] = int(wd)
+
+            # 6. Lead Time (days)
             if "lead_time_days" not in extracted:
                 lt = extract_number([
-                    r"(?:lead\s*time|replenishment\s*time|delivery\s*time)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
-                    r"([0-9,]+(?:\.[0-9]+)?)[- ]day\s*(?:lead\s*time|delivery\s*time|replenishment)",
-                    r"takes\s*([0-9,]+(?:\.[0-9]+)?)\s*days?\s*to\s*arrive",
+                    r"(?:supplier\s*(?:replenishment\s*)?lead[- ]time|lead[- ]time|replenishment\s*time|delivery\s*time|replenishment\s*lead[- ]time)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|business\s*days?|days?|weeks?)?",
+                    r"([0-9,]+(?:\.[0-9]+)?)[- ](?:working\s*day|business\s*day|day)\s*(?:lead\s*time|delivery\s*time|replenishment)",
+                    r"takes\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|business\s*days?|days?)\s*to\s*arrive",
+                    r"\b[lL]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|days?)?",
                 ], q)
                 if lt is not None:
                     extracted["lead_time_days"] = lt
@@ -320,11 +338,12 @@ class InventoryDecisionAgent:
             # Demand
             if "demand" not in extracted:
                 d = extract_number([
-                    r"(?:annual\s*demand|yearly\s*demand|demand\s*per\s*year|demand\s*annually|annual\s*sales|annual\s*usage)(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?",
-                    r"(?:demand|sells?)(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?\s*(?:per\s*year|annually)",
-                    r"([0-9,]+(?:\.[0-9]+)?)\s*units\s*(?:per\s*year|annually)",
-                    r"(?:demand|annual\s*usage|usage)(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?",
-                    r"(?:annual\s*demand|demand)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?",
+                    r"(?:annual\s*demand|yearly\s*demand|demand\s*per\s*year|demand\s*annually|annual\s*sales|annual\s*usage)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"(?:demand|sells?)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:per\s*year|annually)",
+                    r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:per\s*year|annually)",
+                    r"(?:demand|annual\s*usage|usage)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"(?:annual\s*demand|demand)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"\b[dD]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d is not None:
                     extracted["demand"] = d
@@ -332,12 +351,13 @@ class InventoryDecisionAgent:
             # Ordering Cost (using all standard ordering synonyms)
             if "ordering_cost" not in extracted:
                 s = extract_number([
-                    r"(?:ordering\/setup\s*costs?|ordering\s*and\s*setup\s*costs?|order\/setup\s*costs?)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:cost\s*of\s*placing\s*(?:an?|a\s*purchase)?\s*order|cost\s*to\s*place\s*(?:an?|a\s*purchase)?\s*order|cost\s*per\s*order)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:setup\s*expenses?|setup\s*costs?|ordering\s*costs?|order\s*costs?)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:placing\s*(?:an?|a\s*purchase)?\s*order\s*costs?|place\s*(?:an?|a\s*purchase)?\s*order\s*costs?|order\s*fee|setup\s*fee)\s*(?:us|is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"costs?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:to\s*place\s*(?:an?|a\s*purchase)?\s*order|per\s*order|each\s*time\s*we\s*order|per\s*setup|to\s*order)",
-                    r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*order|setup\s*expense|setup\s*cost|ordering\s*cost|order\s*cost|ordering\/setup\s*cost|each\s*time\s*we\s*order)",
+                    r"(?:ordering\/setup\s*costs?|ordering\s*and\s*setup\s*costs?|order\/setup\s*costs?|order\s*and\s*setup\s*costs?)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"(?:cost\s*of\s*placing\s*(?:an?|a\s*purchase)?\s*order|cost\s*to\s*place\s*(?:an?|a\s*purchase)?\s*order|cost\s*per\s*(?:purchase\s*)?order|expense\s*per\s*(?:purchase\s*)?order)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"(?:setup\s*expenses?|setup\s*costs?|ordering\s*costs?|order\s*costs?)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"(?:placing\s*(?:(?:an?|a\s*purchase)\s*)?order\s*costs?|place\s*(?:(?:an?|a\s*purchase)\s*)?order\s*costs?|order\s*fee|setup\s*fee)" + var_annot + r"\s*(?:us|is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?",
+                    r"costs?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:to\s*place\s*(?:an?|a\s*purchase)?\s*order|per\s*(?:purchase\s*)?order|each\s*time\s*we\s*order|per\s*setup|to\s*order)",
+                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:purchase\s*)?order|setup\s*expense|setup\s*cost|ordering\s*cost|order\s*cost|ordering\/setup\s*cost|each\s*time\s*we\s*order)",
+                    r"\b[sS]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if s is not None:
                     extracted["ordering_cost"] = s
@@ -345,8 +365,9 @@ class InventoryDecisionAgent:
             # Percentage Holding Cost (holding_cost_rate)
             if "holding_cost_rate" not in extracted:
                 h_rate = extract_number([
-                    r"(?:percentage\s*holding\s*costs?|inventory\s*carrying\s*cost\s*rate|carrying\s*cost\s*rate|holding\s*cost\s*rate|carrying\s*rate|holding\s*rate)\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
-                    r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:carrying\s*cost\s*rate|holding\s*cost\s*rate|of\s*unit\s*price|of\s*purchase\s*price|carrying|holding)",
+                    r"(?:percentage\s*holding\s*costs?|inventory\s*carrying\s*cost\s*rate|carrying\s*cost\s*rate|holding\s*cost\s*rate|carrying\s*rate|holding\s*rate|annual\s*carrying\s*cost\s*rate|annual\s*holding\s*cost\s*rate)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+                    r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:carrying\s*cost\s*rate|holding\s*cost\s*rate|of\s*(?:unit|purchase)?\s*price|carrying|holding)",
+                    r"\b[iI]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9]+(?:\.[0-9]+)?)\s*%",
                 ], q)
                 if h_rate is not None:
                     extracted["holding_cost_rate"] = h_rate / 100.0
@@ -354,9 +375,10 @@ class InventoryDecisionAgent:
             # Fixed Holding Cost (fixed_holding_cost)
             if "fixed_holding_cost" not in extracted and "holding_cost_rate" not in extracted:
                 fixed_h = extract_number([
-                    r"(?:fixed\s*holding\s*costs?|fixed\s*carrying\s*costs?)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"holding\s*cost\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*unit\s*(?:per\s*year|annually|\/year|a\s*year))",
-                    r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:per\s*unit\s*(?:per\s*year|annually)\s*(?:fixed\s*)?holding\s*cost|fixed\s*holding\s*cost)",
+                    r"(?:annual\s*|yearly\s*)?(?:fixed\s*)?(?:inventory\s*)?(?:holding|carrying)(?:\/carrying|\/holding)?\s*(?:costs?|expenses?)" + var_annot + r"(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?(?:\s*(?:\/|\s*per\s*)(?:unit|item|piece|sku|" + unit_nouns + r")(?:\s*(?:\/|\s*per\s*)(?:year|annum|annually))?)?",
+                    r"holding\s*cost\s*(?:is|of|=|:)?\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually|\/year|a\s*year))",
+                    r"[\$]?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:dollars?|bucks?|\$)?\s*(?:per\s*(?:unit|" + unit_nouns + r")\s*(?:per\s*year|annually)\s*(?:fixed\s*)?holding\s*cost|fixed\s*holding\s*cost)",
+                    r"\b[hH]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if fixed_h is not None:
                     extracted["fixed_holding_cost"] = fixed_h
@@ -383,10 +405,11 @@ class InventoryDecisionAgent:
             # 1. Average Demand (d)
             if "demand_rate" not in extracted:
                 d = extract_number([
-                    r"(?:average\s*demand|mean\s*demand|average\s*daily\s*demand|mean\s*daily\s*demand|daily\s*demand|demand\s*rate)(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"demand(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:averages?|is\s*averaging|rate\s*is)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?\s*(?:per\s*day|a\s*day|daily)",
-                    r"([0-9,]+(?:\.[0-9]+)?)\s*units\s*(?:per\s*day|a\s*day|daily)",
-                    r"demand\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?",
+                    r"(?:average\s*demand|mean\s*demand|average\s*daily\s*demand|mean\s*daily\s*demand|daily\s*demand|demand\s*rate)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"demand(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:averages?|is\s*averaging|rate\s*is)?" + var_annot + r"\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:per\s*day|a\s*day|daily)",
+                    r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:per\s*day|a\s*day|daily)",
+                    r"demand\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"\b[dD]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d is not None:
                     extracted["demand_rate"] = d
@@ -394,10 +417,11 @@ class InventoryDecisionAgent:
             # 2. Demand Standard Deviation (sigma_d)
             if "demand_std" not in extracted:
                 d_std = extract_number([
-                    r"(?:demand\s*standard\s*deviation|standard\s*deviation\s*of\s*(?:daily\s*)?demand|demand\s*std\s*dev|demand\s*stdev|demand\s*std|daily\s*demand\s*std)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:daily\s*)?demand\s*(?:is|of|=|averages?)?\s*[0-9,.]+\s*(?:units)?\s*(?:per\s*day)?\s*(?:with|and|,)?\s*(?:a\s*)?(?:demand\s*)?(?:standard\s*deviation|std\s*dev|stdev)\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:standard\s*deviation|std\s*dev|stdev)\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:units)\b",
+                    r"(?:demand\s*standard\s*deviation|standard\s*deviation\s*of\s*(?:daily\s*)?demand|demand\s*std\s*dev|demand\s*stdev|demand\s*std|daily\s*demand\s*std)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:daily\s*)?demand\s*(?:is|of|=|averages?)?\s*[0-9,.]+\s*(?:" + unit_nouns + r")?\s*(?:per\s*day)?\s*(?:with|and|,)?\s*(?:a\s*)?(?:demand\s*)?(?:standard\s*deviation|std\s*dev|stdev)" + var_annot + r"\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:standard\s*deviation|std\s*dev|stdev)" + var_annot + r"\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\b",
                     r"demand\s*variation\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"\b(?:σ_?d|sigma_?d|s_?d)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d_std is not None:
                     extracted["demand_std"] = d_std
@@ -407,10 +431,11 @@ class InventoryDecisionAgent:
             # 3. Average Lead Time (L)
             if "lead_time" not in extracted:
                 lt = extract_number([
-                    r"(?:average\s*lead[- ]time|average\s*lead\s*time|mean\s*lead[- ]time|mean\s*lead\s*time|lead[- ]time|lead\s*time|replenishment\s*lead[- ]time|replenishment\s*time|delivery\s*lead[- ]time|delivery\s*time|supplier\s*(?:replenishment\s*)?lead[- ]time)\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:days?|weeks?)?",
-                    r"(?:supplier\s*)?(?:replenishment\s*)?lead[- ]time\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:days?|weeks?)?",
-                    r"takes\s*(?:an\s*average\s*of)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:days?|weeks?)\s*(?:lead[- ]time|to\s*arrive|delivery)?",
-                    r"([0-9,]+(?:\.[0-9]+)?)[- ]day\s*(?:lead[- ]time|delivery\s*time|replenishment)",
+                    r"(?:average\s*lead[- ]time|average\s*lead\s*time|mean\s*lead[- ]time|mean\s*lead\s*time|lead[- ]time|lead\s*time|replenishment\s*lead[- ]time|replenishment\s*time|delivery\s*lead[- ]time|delivery\s*time|supplier\s*(?:replenishment\s*)?lead[- ]time)" + var_annot + r"\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|business\s*days?|days?|weeks?)?",
+                    r"(?:supplier\s*)?(?:replenishment\s*)?lead[- ]time" + var_annot + r"\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|business\s*days?|days?|weeks?)?",
+                    r"takes\s*(?:an\s*average\s*of)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|business\s*days?|days?|weeks?)\s*(?:lead[- ]time|to\s*arrive|delivery)?",
+                    r"([0-9,]+(?:\.[0-9]+)?)[- ](?:working\s*day|business\s*day|day)\s*(?:lead[- ]time|delivery\s*time|replenishment)",
+                    r"\b[lL]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|days?)?",
                 ], q)
                 if lt is not None:
                     extracted["lead_time"] = lt
@@ -418,11 +443,12 @@ class InventoryDecisionAgent:
             # 4. Lead-Time Standard Deviation (sigma_L)
             if "lead_time_std" not in extracted:
                 lt_std = extract_number([
-                    r"(?:lead[- ]time\s*standard\s*deviation|lead\s*time\s*standard\s*deviation|standard\s*deviation\s*of\s*lead[- ]time|standard\s*deviation\s*of\s*lead\s*time|lead[- ]time\s*std\s*dev|lead\s*time\s*std\s*dev|lead[- ]time\s*std|lead\s*time\s*std)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:(?:supplier\s*)?replenishment\s*)?lead[- ]time\s*(?:is|averages?)?\s*[0-9,.]+\s*(?:days?)?\s*(?:with|and|,)?\s*(?:a\s*)?(?:lead[- ]time\s*)?(?:standard\s*deviation|std\s*dev|stdev)\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:standard\s*deviation|std\s*dev|stdev)\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:days?|weeks?)\b",
+                    r"(?:lead[- ]time\s*standard\s*deviation|lead\s*time\s*standard\s*deviation|standard\s*deviation\s*of\s*lead[- ]time|standard\s*deviation\s*of\s*lead\s*time|lead[- ]time\s*std\s*dev|lead\s*time\s*std\s*dev|lead[- ]time\s*std|lead\s*time\s*std)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:(?:supplier\s*)?replenishment\s*)?lead[- ]time\s*(?:is|averages?)?\s*[0-9,.]+\s*(?:days?)?\s*(?:with|and|,)?\s*(?:a\s*)?(?:lead[- ]time\s*)?(?:standard\s*deviation|std\s*dev|stdev)" + var_annot + r"\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:standard\s*deviation|std\s*dev|stdev)" + var_annot + r"\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:days?|weeks?)\b",
                     r"lead[- ]time\s*varies\s*by\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
                     r"lead[- ]time\s*variation\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"\b(?:σ_?l|sigma_?l|s_?l)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if lt_std is not None:
                     extracted["lead_time_std"] = lt_std
@@ -432,10 +458,11 @@ class InventoryDecisionAgent:
             # 5. Service Level (CSL)
             if "service_level" not in extracted:
                 sl = extract_number([
-                    r"(?:target\s*(?:cycle\s*)?service\s*level|cycle\s*service\s*level|service\s*level|csl|service\s*rate|service\s*probability)\s*(?:is|of|target|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+                    r"(?:target\s*(?:cycle\s*)?service\s*level|cycle\s*service\s*level|service\s*level|csl|service\s*rate|service\s*probability)" + var_annot + r"\s*(?:is|of|target|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
                     r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:cycle\s*service\s*level|service\s*level|csl)",
                     r"(?:mandates?|requires?|targets?)\s*(?:a\s*)?([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:cycle\s*)?service\s*level",
-                    r"(?:target\s*)?(?:service\s*level|csl)\s*(?:is|of|=|:)?\s*(0\.[0-9]+)",
+                    r"(?:target\s*)?(?:service\s*level|csl)" + var_annot + r"\s*(?:is|of|=|:)?\s*(0\.[0-9]+)",
+                    r"\b(?:csl|sl)" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9]+(?:\.[0-9]+)?)\s*%",
                 ], q)
                 if sl is not None:
                     extracted["service_level"] = sl / 100.0 if sl > 1.0 else sl
@@ -445,7 +472,8 @@ class InventoryDecisionAgent:
             # Order quantity Q (optional, for Type II fill rate)
             if "order_quantity" not in extracted:
                 oq = extract_number([
-                    r"(?:order\s*quantity|batch\s*size|replenishment\s*lot\s*size|q)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:order\s*quantity|batch\s*size|replenishment\s*lot\s*size|q)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"\b[qQ]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if oq is not None:
                     extracted["order_quantity"] = oq
@@ -462,8 +490,9 @@ class InventoryDecisionAgent:
             # 1. Review Period (R)
             if "review_period" not in extracted:
                 r_period = extract_number([
-                    r"(?:review\s*period|review\s*interval|review\s*cycle|order\s*interval|reviews?\s*inventory\s*every|review\s*every|order\s*every)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
+                    r"(?:review\s*period|review\s*interval|review\s*cycle|order\s*interval|reviews?\s*inventory\s*every|review\s*every|order\s*every)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
                     r"every\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
+                    r"\b[rR]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
                 ], q)
                 if r_period is not None:
                     extracted["review_period"] = r_period
@@ -477,9 +506,10 @@ class InventoryDecisionAgent:
             # 2. Lead Time (L)
             if "lead_time" not in extracted:
                 lt = extract_number([
-                    r"(?:lead[- ]time|lead\s*time|delivery\s*lead[- ]time|delivery\s*time|replenishment\s*time|replenishment\s*lead[- ]time|supplier\s*(?:replenishment\s*)?lead[- ]time)\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*days?",
-                    r"takes\s*([0-9,]+(?:\.[0-9]+)?)\s*days?\s*to\s*arrive",
-                    r"([0-9,]+(?:\.[0-9]+)?)[- ]day\s*lead[- ]time",
+                    r"(?:lead[- ]time|lead\s*time|delivery\s*lead[- ]time|delivery\s*time|replenishment\s*time|replenishment\s*lead[- ]time|supplier\s*(?:replenishment\s*)?lead[- ]time)" + var_annot + r"\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|business\s*days?|days?|weeks?)?",
+                    r"takes\s*(?:an\s*average\s*of)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|business\s*days?|days?|weeks?)\s*(?:lead[- ]time|to\s*arrive|delivery)?",
+                    r"([0-9,]+(?:\.[0-9]+)?)[- ](?:working\s*day|business\s*day|day)\s*lead[- ]time",
+                    r"\b[lL]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:working\s*days?|days?)?",
                 ], q)
                 if lt is not None:
                     extracted["lead_time"] = lt
@@ -487,10 +517,11 @@ class InventoryDecisionAgent:
             # 3. Demand Rate (d)
             if "demand_rate" not in extracted:
                 d = extract_number([
-                    r"(?:daily\s*demand|average\s*daily\s*demand|mean\s*daily\s*demand|demand\s*rate|average\s*demand|mean\s*demand|demand)\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?\s*(?:\/|\s*per\s*)day",
-                    r"(?:daily\s*demand|average\s*daily\s*demand|mean\s*daily\s*demand|demand\s*rate|average\s*demand|mean\s*demand)\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"([0-9,]+(?:\.[0-9]+)?)\s*units?\s*(?:\/|\s*per\s*)day",
-                    r"demand\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:daily\s*demand|average\s*daily\s*demand|mean\s*daily\s*demand|demand\s*rate|average\s*demand|mean\s*demand|demand)" + var_annot + r"(?:\s+(?:for|of)\s+[a-zA-Z][a-zA-Z0-9\s/-]*?(?:\s+(?:is|averages?|averaging|=|:|at))?)?\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:\/|\s*per\s*)day",
+                    r"(?:daily\s*demand|average\s*daily\s*demand|mean\s*daily\s*demand|demand\s*rate|average\s*demand|mean\s*demand)" + var_annot + r"\s*(?:is|of|averages?|averaging|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*(?:\/|\s*per\s*)day",
+                    r"demand\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
+                    r"\b[dD]" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d is not None:
                     extracted["demand_rate"] = d
@@ -498,10 +529,11 @@ class InventoryDecisionAgent:
             # 4. Demand Standard Deviation (sigma_d)
             if "demand_std" not in extracted:
                 d_std = extract_number([
-                    r"(?:demand\s*standard\s*deviation|standard\s*deviation\s*of\s*(?:daily\s*)?demand|demand\s*std\s*dev|demand\s*stdev|demand\s*std|std\s*dev\s*of\s*demand)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"demand\s*(?:is|of|=|averages?)?\s*[0-9,.]+\s*(?:units)?\s*(?:with|and|,)?\s*(?:a\s*)?(?:demand\s*)?(?:std\s*dev|standard\s*deviation)\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"(?:with|and)\s*(?:a\s*)?(?:std\s*dev|standard\s*deviation|stdev)\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:demand\s*standard\s*deviation|standard\s*deviation\s*of\s*(?:daily\s*)?demand|demand\s*std\s*dev|demand\s*stdev|demand\s*std|std\s*dev\s*of\s*demand)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"demand\s*(?:is|of|=|averages?)?\s*[0-9,.]+\s*(?:" + unit_nouns + r")?\s*(?:with|and|,)?\s*(?:a\s*)?(?:demand\s*)?(?:std\s*dev|standard\s*deviation)" + var_annot + r"\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:with|and)\s*(?:a\s*)?(?:std\s*dev|standard\s*deviation|stdev)" + var_annot + r"\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
                     r"std\s*dev\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"\b(?:σ_?d|sigma_?d|s_?d)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d_std is not None:
                     extracted["demand_std"] = d_std
@@ -511,8 +543,10 @@ class InventoryDecisionAgent:
             # 5. Service Level (CSL)
             if "service_level" not in extracted:
                 sl = extract_number([
-                    r"(?:service\s*level|cycle\s*service\s*level|csl)\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
+                    r"(?:service\s*level|cycle\s*service\s*level|csl)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
                     r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:service\s*level|cycle\s*service\s*level|csl)",
+                    r"(?:mandates?|requires?|targets?)\s*(?:a\s*)?([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:cycle\s*)?service\s*level",
+                    r"\b(?:csl|sl)" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9]+(?:\.[0-9]+)?)\s*%",
                 ], q)
                 if sl is not None:
                     extracted["service_level"] = sl / 100.0 if sl > 1.0 else sl
@@ -522,24 +556,24 @@ class InventoryDecisionAgent:
             # 6. Inventory Position / On-Hand / On-Order / Backorders
             # Direct Inventory Position if stated
             inv_pos = extract_number([
-                r"(?:inventory\s*position|effective\s*inventory)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                r"(?:inventory\s*position|effective\s*inventory)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
             ], q)
 
             on_hand = extract_number([
-                r"(?:on[- ]hand\s*inventory|on\s*hand\s*inventory|on[- ]hand\s*stock|on\s*hand\s*stock|current\s*on[- ]hand|physical\s*inventory|in\s*warehouse|current\s*stock|currently\s*have|in\s*stock)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                r"have\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:units\s*)?(?:on[- ]hand|in\s*stock|in\s*the\s*warehouse)",
-                r"([0-9,]+(?:\.[0-9]+)?)\s*(?:units\s*)?(?:on[- ]hand|in\s*stock|in\s*warehouse\s*stock)",
+                r"(?:on[- ]hand\s*inventory|on\s*hand\s*inventory|on[- ]hand\s*stock|on\s*hand\s*stock|current\s*on[- ]hand|physical\s*inventory|in\s*warehouse|current\s*stock|currently\s*have|in\s*stock)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                r"have\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r"\s*)?(?:on[- ]hand|in\s*stock|in\s*the\s*warehouse)",
+                r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r"\s*)?(?:on[- ]hand|in\s*stock|in\s*warehouse\s*stock)",
             ], q)
 
             pipeline = extract_number([
-                r"(?:on[- ]order\s*inventory|on\s*order\s*inventory|on[- ]order\s*stock|pipeline\s*orders?|pipeline\s*inventory|in\s*pipeline|in\s*transit|open\s*orders?|open\s*purchase\s*orders?|incoming\s*orders?)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                r"([0-9,]+(?:\.[0-9]+)?)\s*(?:units\s*)?(?:in\s*pipeline|in\s*transit|on[- ]order|on\s*order)",
+                r"(?:on[- ]order\s*inventory|on\s*order\s*inventory|on[- ]order\s*stock|pipeline\s*orders?|pipeline\s*inventory|in\s*pipeline|in\s*transit|open\s*orders?|open\s*purchase\s*orders?|incoming\s*orders?)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r"\s*)?(?:in\s*pipeline|in\s*transit|on[- ]order|on\s*order)",
                 r"pipeline\s*of\s*([0-9,]+(?:\.[0-9]+)?)",
             ], q)
 
             backorders = extract_number([
-                r"(?:backorders?|back-orders?|backordered|backlogged|backlog|unfilled\s*orders?)\s*(?:are|is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                r"([0-9,]+(?:\.[0-9]+)?)\s*(?:units\s*)?(?:backordered|backlogged|on\s*backorder)",
+                r"(?:backorders?|back-orders?|backordered|backlogged|backlog|unfilled\s*orders?)" + var_annot + r"\s*(?:are|is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                r"([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r"\s*)?(?:backordered|backlogged|on\s*backorder)",
             ], q)
 
             if inv_pos is not None and on_hand is None:
@@ -565,8 +599,9 @@ class InventoryDecisionAgent:
             # 1. Selling Price (P)
             if "selling_price" not in extracted:
                 p = extract_number([
-                    r"(?:selling\s*price|retail\s*price|sales\s*price|unit\s*selling\s*price|retail\s*value|retails?\s*(?:for|at)|sells?\s*(?:for|at))\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:selling\s*price|retail\s*price|sales\s*price|unit\s*selling\s*price|retail\s*value|retails?\s*(?:for|at)|sells?\s*(?:for|at))" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                     r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:selling\s*price|retail|retail\s*price|sale\s*price)",
+                    r"\b[pP]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if p is not None:
                     extracted["selling_price"] = p
@@ -574,9 +609,10 @@ class InventoryDecisionAgent:
             # 2. Purchase Cost (C)
             if "unit_cost" not in extracted:
                 c = extract_number([
-                    r"(?:purchase\s*cost|unit\s*purchase\s*cost|procurement\s*cost|unit\s*cost|wholesale\s*cost|wholesale\s*price|cost\s*per\s*unit|production\s*cost|cost\s*to\s*produce|buys?\s*for|costs?\s*us)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:purchase\s*cost|unit\s*purchase\s*cost|procurement\s*cost|unit\s*cost|wholesale\s*cost|wholesale\s*price|cost\s*per\s*(?:unit|" + unit_nouns + r")|production\s*cost|cost\s*to\s*produce|buys?\s*for|costs?\s*us)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                     r"costs?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)\s*(?:to\s*procure|to\s*produce|to\s*buy|each)",
                     r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:purchase\s*cost|unit\s*cost|wholesale)",
+                    r"\b[cC]" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if c is not None:
                     extracted["unit_cost"] = c
@@ -584,10 +620,11 @@ class InventoryDecisionAgent:
             # 3. Salvage Value (S_val)
             if "salvage_value" not in extracted:
                 s_val = extract_number([
-                    r"(?:salvage\s*value|salvage\s*price|salvage|markdown\s*price|markdown\s*value|markdown|liquidation\s*value|liquidation\s*price|scrap\s*value|residual\s*value|recovery\s*value)\s*(?:for\s*unsold\s*(?:items?|units?)|is|of|for|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
-                    r"unsold\s*(?:items?|units?|goods?)\s*(?:sell\s*for|salvage\s*for|liquidate\s*for|is|are|yield|recover)?\s*(?:an?\s*(?:off-price\s*)?salvage\s*(?:markdown\s*)?(?:of)?)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:salvage\s*value|salvage\s*price|salvage|markdown\s*price|markdown\s*value|markdown|liquidation\s*value|liquidation\s*price|scrap\s*value|residual\s*value|recovery\s*value)" + var_annot + r"\s*(?:for\s*unsold\s*(?:items?|units?|" + unit_nouns + r")|is|of|for|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                    r"unsold\s*(?:items?|units?|goods?|" + unit_nouns + r")\s*(?:sell\s*for|salvage\s*for|liquidate\s*for|is|are|yield|recover)?\s*(?:an?\s*(?:off-price\s*)?salvage\s*(?:markdown\s*)?(?:of)?)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                     r"liquidated?\s*at\s*(?:an?\s*(?:off-price\s*)?salvage\s*markdown\s*of)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                     r"[\$]([0-9,]+(?:\.[0-9]+)?)\s*(?:salvage|markdown|salvage\s*value)",
+                    r"\b(?:v|s_?val|salvage)" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if s_val is not None:
                     extracted["salvage_value"] = s_val
@@ -596,21 +633,23 @@ class InventoryDecisionAgent:
 
             # 4. Underage / Shortage Cost (Cu)
             cu = extract_number([
-                r"(?:underage\s*cost|cost\s*of\s*underage|shortage\s*cost|cost\s*of\s*shortage)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                r"(?:underage\s*cost|cost\s*of\s*underage|shortage\s*cost|cost\s*of\s*shortage)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                r"\b(?:c_?u|cu)" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
             ], q)
             if cu is not None:
                 extracted["underage_cost"] = cu
 
             # 5. Overage / Excess Cost (Co)
             co = extract_number([
-                r"(?:overage\s*cost|cost\s*of\s*overage|excess\s*cost|cost\s*of\s*excess|loss\s*per\s*unsold\s*unit)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                r"(?:overage\s*cost|cost\s*of\s*overage|excess\s*cost|cost\s*of\s*excess|loss\s*per\s*unsold\s*unit)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                r"\b(?:c_?o|co)" + var_annot + r"\s*(?:is|of|=|:)\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
             ], q)
             if co is not None:
                 extracted["overage_cost"] = co
 
             # Shortage Penalty
             pen = extract_number([
-                r"(?:shortage\s*penalty|goodwill\s*penalty|penalty\s*per\s*lost\s*sale|penalty\s*for\s*stockout|goodwill\s*loss)\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
+                r"(?:shortage\s*penalty|goodwill\s*penalty|penalty\s*per\s*lost\s*sale|penalty\s*for\s*stockout|goodwill\s*loss)" + var_annot + r"\s*(?:is|of|=|:)?\s*[\$]?([0-9,]+(?:\.[0-9]+)?)",
             ], q)
             if pen is not None:
                 extracted["shortage_penalty"] = pen
@@ -626,9 +665,10 @@ class InventoryDecisionAgent:
             # 6. Mean Demand (mu)
             if "demand_mean" not in extracted:
                 d_mean = extract_number([
-                    r"(?:mean\s*demand|average\s*demand|expected\s*demand|demand\s*mean|demand\s*averages?)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"(?:mean\s*demand|average\s*demand|expected\s*demand|demand\s*mean|demand\s*averages?)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
                     r"demand\s*(?:is\s*normally\s*distributed\s*with\s*(?:a\s*)?)?mean\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"demand\s*of\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:units)?\s*with\s*(?:a\s*)?(?:std\s*dev|standard\s*deviation)",
+                    r"demand\s*of\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?\s*with\s*(?:a\s*)?(?:std\s*dev|standard\s*deviation)",
+                    r"\b(?:μ|mu)" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d_mean is not None:
                     extracted["demand_mean"] = d_mean
@@ -636,9 +676,10 @@ class InventoryDecisionAgent:
             # 7. Demand Standard Deviation (sigma)
             if "demand_std" not in extracted:
                 d_std = extract_number([
-                    r"(?:demand\s*standard\s*deviation|standard\s*deviation\s*of\s*demand|demand\s*std\s*dev|demand\s*std|demand\s*stdev)\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
-                    r"standard\s*deviation\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:units|coats|items)?",
+                    r"(?:demand\s*standard\s*deviation|standard\s*deviation\s*of\s*demand|demand\s*std\s*dev|demand\s*std|demand\s*stdev)" + var_annot + r"\s*(?:is|of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"standard\s*deviation\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:" + unit_nouns + r")?",
                     r"std\s*dev\s*(?:of|=|:)?\s*([0-9,]+(?:\.[0-9]+)?)",
+                    r"\b(?:σ|sigma)" + var_annot + r"\s*(?:is|of|=|:)\s*([0-9,]+(?:\.[0-9]+)?)",
                 ], q)
                 if d_std is not None:
                     extracted["demand_std"] = d_std
